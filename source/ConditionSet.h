@@ -20,8 +20,6 @@ PARTICULAR PURPOSE.  See the GNU General Public License for more details.
 class DataNode;
 class DataWriter;
 
-
-
 // A condition set is a collection of operations on the player's set of named
 // "conditions". This includes "test" operations that just check the values of
 // those conditions, and other operations that can be "applied" to change the
@@ -111,12 +109,21 @@ private:
 			
 			// Substitute numbers for any string values and then compute the result.
 			int64_t Evaluate(const Conditions &conditions, const Conditions &created) const;
-			
+			// For a SubExpression consisting entirely of a single token or a bracket expression,
+			// return the effective Condition name.
+			std::string GetConditionName(const Conditions &conditions, const Conditions &created) const;
 			
 		private:
+			// for forming a SubExpression from part of another SubExpression
+			SubExpression(std::vector<std::string>::const_iterator tokensBegin,
+						  std::vector<std::string>::const_iterator operatorsBegin,
+						  std::vector<std::string>::const_iterator operatorsEnd);
 			void ParseSide(const std::vector<std::string> &side);
 			void GenerateSequence();
 			bool AddOperation(std::vector<int> &data, size_t &index, const size_t &opIndex);
+			std::vector<int64_t> SubstituteValues(const std::vector<std::string> &side,
+												  const std::map<std::string, int64_t> &conditions,
+												  const std::map<std::string, int64_t> &created) const;
 			
 			
 		private:
@@ -138,6 +145,7 @@ private:
 			// The tokens vector converts into a data vector of numeric values during evaluation.
 			std::vector<std::string> tokens;
 			std::vector<std::string> operators;
+			std::vector<std::pair<size_t, SubExpression>> bracketExpressions;
 			// The number of true (non-parentheses) operators.
 			int operatorCount = 0;
 		};
@@ -169,7 +177,5 @@ private:
 	// Nested sets of conditions to be tested.
 	std::vector<ConditionSet> children;
 };
-
-
 
 #endif

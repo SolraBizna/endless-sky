@@ -52,7 +52,17 @@ namespace {
 			{"*", [](int64_t a, int64_t b) { return a * b; }},
 			{"+", [](int64_t a, int64_t b) { return a + b; }},
 			{"-", [](int64_t a, int64_t b) { return a - b; }},
-			{"/", [](int64_t a, int64_t b) { return b ? a / b : numeric_limits<int64_t>::max(); }}
+			{"/", [](int64_t a, int64_t b) { return b ? a / b : numeric_limits<int64_t>::max(); }},
+			{"&=", [](int64_t a, int64_t b) { return a & b; }},
+			{"|=", [](int64_t a, int64_t b) { return a | b; }},
+			{"~=", [](int64_t a, int64_t b) { return a ^ b; }},
+			{">>=", [](int64_t a, int64_t b) { return a >> b; }},
+			{"<<=", [](int64_t a, int64_t b) { return a << b; }},
+			{"&", [](int64_t a, int64_t b) { return a & b; }},
+			{"|", [](int64_t a, int64_t b) { return a | b; }},
+			{"~", [](int64_t a, int64_t b) { return a ^ b; }},
+			{">>", [](int64_t a, int64_t b) { return a >> b; }},
+			{"<<", [](int64_t a, int64_t b) { return a << b; }},
 		};
 		
 		auto it = opMap.find(op);
@@ -71,7 +81,8 @@ namespace {
 	bool IsAssignment(const string &op)
 	{
 		static const set<string> assignment = {
-			"=", "+=", "-=", "*=", "/=", "<?=", ">?="
+			"=", "+=", "-=", "*=", "/=", "<?=", ">?=",
+			"&=", "|=", "^=", ">>=", "<<=",
 		};
 		return assignment.count(op);
 	}
@@ -79,7 +90,8 @@ namespace {
 	bool IsSimple(const string &op)
 	{
 		static const set<string> simple = {
-			"(", ")", "+", "-", "*", "/", "%"
+			"(", ")", "[", "]", "+", "-", "*", "/", "%",
+			"&", "|", "^", ">>", "<<",
 		};
 		return simple.count(op);
 	}
@@ -88,8 +100,13 @@ namespace {
 	{
 		static const map<string, int> precedence = {
 			{"(", 0}, {")", 0},
-			{"+", 1}, {"-", 1},
-			{"*", 2}, {"/", 2}, {"%", 2}
+			{"[", 0}, {"]", 0},
+			// Using the C precedence for bitwise operations, even though it
+			// is usually NOT what is wanted.
+			{"&", 1}, {"|", 1}, {"~", 1},
+			{"<<", 2}, {">>", 2},
+			{"+", 3}, {"-", 3},
+			{"*", 4}, {"/", 4}, {"%", 4}
 		};
 		return precedence.at(op);
 	}
@@ -98,8 +115,7 @@ namespace {
 	bool HasInvalidOperators(const vector<string> &tokens)
 	{
 		static const set<string> invalids = {
-			"{", "}", "[", "]", "|", "^", "&", "!", "~",
-			"||", "&&", "&=", "|=", "<<", ">>"
+			"{", "}", "!", "^", "||", "&&",
 		};
 		for(const string &str : tokens)
 			if(invalids.count(str))
@@ -110,19 +126,31 @@ namespace {
 	// Ensure the ConditionSet line has balanced parentheses on both sides.
 	bool HasUnbalancedParentheses(const vector<string> &tokens)
 	{
-		int parentheses = 0;
+		vector<char> parentheses;
 		for(const string &str : tokens)
 		{
-			if(parentheses < 0)
-				return true;
-			else if(parentheses && (IsAssignment(str) || IsComparison(str)))
+			if(!parentheses.empty() && (IsAssignment(str) || IsComparison(str)))
 				return true;
 			else if(str == "(")
-				++parentheses;
-			else if(str == ")")
-				--parentheses;
+				parentheses.push_back('(');
+			else if(str == ")") {
+				if(parentheses.empty())
+					return true;
+				else if(parentheses.back() != '(')
+					return true;
+				parentheses.pop_back();
+			}
+			else if(str == "[")
+				parentheses.push_back('[');
+			else if(str == "]") {
+				if(parentheses.empty())
+					return true;
+				else if(parentheses.back() != '[')
+					return true;
+				parentheses.pop_back();
+			}
 		}
-		return parentheses;
+		return !parentheses.empty();
 	}
 	
 	// Perform a preliminary assessment of the input condition, to determine if it is remotely well-formed.
@@ -135,43 +163,18 @@ namespace {
 		if(assigns + compares != 1)
 			node.PrintTrace("An expression must either perform a comparison, or an assign a value:");
 		else if(HasInvalidOperators(tokens))
-			node.PrintTrace("Brackets, braces, exponentiation, and boolean/bitwise math are not supported:");
+			node.PrintTrace("Braces, exponentiation, and boolean math are not supported:");
 		else if(HasUnbalancedParentheses(tokens))
-			node.PrintTrace("Unbalanced parentheses in condition expression:");
+			node.PrintTrace("Unbalanced parentheses or brackets in condition expression:");
 		else if(count_if(tokens.begin(), tokens.end(), [](const string &token)
 				{ return token.size() > 1 && token.front() == '('; }))
 			node.PrintTrace("Parentheses must be separate from tokens:");
 		else
 			return true;
+		// (Do not test for embedded brackets in tokens, as there are several
+		// ways this is useful.)
 		
 		return false;
-	}
-	
-	// Converts the given vector of condition tokens (like "reputation: Republic",
-	// "random", or "4") into the integral values they have at runtime.
-	vector<int64_t> SubstituteValues(const vector<string> &side, const map<string, int64_t> &conditions, const map<string, int64_t> &created)
-	{
-		auto result = vector<int64_t>();
-		result.reserve(side.size());
-		for(const string &str : side)
-		{
-			int64_t value = 0;
-			if(str == "random")
-				value = Random::Int(100);
-			else if(DataNode::IsNumber(str))
-				value = static_cast<int64_t>(DataNode::Value(str));
-			else
-			{
-				const auto temp = created.find(str);
-				const auto perm = conditions.find(str);
-				if(temp != created.end())
-					value = temp->second;
-				else if(perm != conditions.end())
-					value = perm->second;
-			}
-			result.emplace_back(value);
-		}
-		return result;
 	}
 	
 	bool UsedAll(const vector<bool> &status)
@@ -183,13 +186,27 @@ namespace {
 	}
 	
 	// Finding the left operand's index if getLeft = true. The operand's index is the first non-empty, non-used index.
-	size_t FindOperandIndex(const vector<string> &tokens, const vector<int> &resultIndices, const size_t &opIndex, bool getLeft)
+	size_t FindOperandIndex(const vector<string> &tokens, const vector<string> &operators, const vector<int> &resultIndices, const size_t &opIndex, bool getLeft)
 	{
 		// Start at the operator index (left), or just past it (right).
 		size_t index = opIndex + !getLeft;
 		if(getLeft)
+		{
 			while(tokens.at(index).empty() && index > 0)
 				--index;
+			if(index > 0 && operators.at(index) == "]")
+			{
+				int balance = 1;
+				while(index > 0 && balance > 0)
+				{
+					if(operators.at(index) == "(" || operators.at(index) == "[")
+						--balance;
+					else if(operators.at(index) == ")" || operators.at(index) == "]")
+						++balance;
+					--index;
+				}
+			}
+		}
 		else
 			while(tokens.at(index).empty() && index < tokens.size() - 2)
 				++index;
@@ -221,6 +238,16 @@ namespace {
 		// that result in unrepresentable values. However, that situation cannot be detected
 		// during expression construction, only during execution.
 		return false;
+	}
+
+	bool IsValidLvalue(const vector<string> &lhs)
+	{
+		if(lhs.size() == 1)
+			return true; // A single token
+		else if(lhs.size() > 3 && lhs.at(1) == "[" && lhs.back() == "]")
+			return true; // A bracket expression
+		else
+			return false; // Something weird
 	}
 }
 
@@ -326,11 +353,11 @@ void ConditionSet::Add(const DataNode &node)
 					op = token;
 				else if(IsAssignment(token))
 				{
-					if(lhs.size() == 1)
+					if(IsValidLvalue(lhs))
 						op = token;
 					else
 					{
-						node.PrintTrace("Assignment operators must be the second token:");
+						node.PrintTrace("The left hand side of an assignment must be a single token or a bracket expression:");
 						return;
 					}
 				}
@@ -548,7 +575,7 @@ bool ConditionSet::Expression::Test(const Conditions &conditions, const Conditio
 // Assign the computed value to the desired condition.
 void ConditionSet::Expression::Apply(Conditions &conditions, Conditions &created) const
 {
-	int64_t &c = conditions[Name()];
+	int64_t &c = conditions[left.GetConditionName(conditions, created)];
 	int64_t value = right.Evaluate(conditions, created);
 	c = fun(c, value);
 }
@@ -558,7 +585,7 @@ void ConditionSet::Expression::Apply(Conditions &conditions, Conditions &created
 // Assign the computed value to the desired temporary condition.
 void ConditionSet::Expression::TestApply(const Conditions &conditions, Conditions &created) const
 {
-	int64_t &c = created[Name()];
+	int64_t &c = created[left.GetConditionName(conditions, created)];
 	int64_t value = right.Evaluate(conditions, created);
 	c = fun(c, value);
 }
@@ -583,6 +610,21 @@ ConditionSet::Expression::SubExpression::SubExpression(const string &side)
 {
 	tokens.emplace_back(side.empty() ? "'" : side);
 }
+
+
+
+// Special constructor used only for SubExpressions within SubExpressions.
+ConditionSet::Expression::SubExpression::SubExpression(vector<string>::const_iterator tokensBegin,
+													   vector<string>::const_iterator operatorsBegin,
+													   vector<string>::const_iterator operatorsEnd) {
+	tokens.push_back(*tokensBegin++);
+	while(operatorsBegin != operatorsEnd) {
+		operators.push_back(*operatorsBegin++);
+		tokens.push_back(*tokensBegin++);
+	}
+	GenerateSequence();
+}
+
 
 
 // Convert the tokens and operators back to a string, for use in logging.
@@ -674,12 +716,26 @@ void ConditionSet::Expression::SubExpression::ParseSide(const vector<string> &si
 	// Construct the tokens and operators vectors.
 	for(size_t i = 0; i < side.size(); ++i)
 	{
-		if(side[i] == "(" || side[i] == ")")
+		if(side[i] == "(" || side[i] == ")" || side[i] == "]")
 		{
 			// Ensure reconstruction by adding a blank token.
 			tokens.emplace_back(EMPTY);
 			operators.emplace_back(side[i]);
 			++parentheses;
+		}
+		else if(side[i] == "[")
+		{
+			if(tokens.empty() || tokens.back() == EMPTY)
+			{
+				PrintConditionError(side);
+				tokens.clear();
+				operators.clear();
+				return; // !!!
+			}
+			// (Left brackets don't need blank tokens.)
+			operators.emplace_back(side[i]);
+			++parentheses;
+			++operatorCount;
 		}
 		else if(IsSimple(side[i]))
 		{
@@ -727,6 +783,40 @@ void ConditionSet::Expression::SubExpression::GenerateSequence()
 	{
 		while(true)
 		{
+			// Before anything else... have we reached a bracket?
+			if(operators.at(opIndex) == "[") {
+				// Index for the subexpression result to be substituted at
+				size_t modIndex = opIndex;
+				int balance = 1;
+				// Consume the open bracket
+				usedOps.at(opIndex++) = true;
+				// Consume everything up to the next close bracket
+				while(balance > 0 && opIndex < operators.size()) {
+					if(operators.at(opIndex) == "(" || operators.at(opIndex) == "[")
+						++balance;
+					else if(operators.at(opIndex) == ")" || operators.at(opIndex) == "]")
+						--balance;
+					dataDest.at(opIndex) = modIndex;
+					usedOps.at(opIndex++) = true;
+				}
+				if(balance != 0)
+				{
+					Files::LogError("Did not find matched brackets:");
+					PrintConditionError(ToStrings());
+					tokens.clear();
+					operators.clear();
+					sequence.clear();
+					return;
+				}
+				SubExpression subExpression(tokens.cbegin() + modIndex + 1,
+											operators.cbegin() + modIndex + 1,
+											operators.cbegin() + opIndex - 1);
+				bracketExpressions.emplace_back(modIndex, move(subExpression));
+				if(opIndex >= operators.size())
+					break;
+				else
+					continue;
+			}
 			// Stack ops until one of lower or equal precedence is found, then evaluate the higher one first.
 			if(opStack.empty() || operators.at(opIndex) == "("
 					|| (Precedence(operators.at(opIndex)) > Precedence(operators.at(opStack.back()))))
@@ -766,9 +856,10 @@ void ConditionSet::Expression::SubExpression::GenerateSequence()
 		size_t workingIndex = opStack.back();
 		opStack.pop_back();
 		
-		if(operators.at(workingIndex) == "(" || operators.at(workingIndex) == ")")
+		if(operators.at(workingIndex) == "(" || operators.at(workingIndex) == ")"
+			|| operators.at(workingIndex) == "]")
 		{
-			Files::LogError("Mismatched parentheses:" + ToString());
+			Files::LogError("Mismatched parentheses or brackets:" + ToString());
 			tokens.clear();
 			operators.clear();
 			sequence.clear();
@@ -787,8 +878,8 @@ bool ConditionSet::Expression::SubExpression::AddOperation(vector<int> &data, si
 {
 	// Obtain the operand indices. The operator is never a parentheses. The
 	// operator index never exceeds the size of the tokens vector.
-	size_t leftIndex = FindOperandIndex(tokens, data, opIndex, true);
-	size_t rightIndex = FindOperandIndex(tokens, data, opIndex, false);
+	size_t leftIndex = FindOperandIndex(tokens, operators, data, opIndex, true);
+	size_t rightIndex = FindOperandIndex(tokens, operators, data, opIndex, false);
 	
 	// Bail out if the pointed token is in-bounds and empty.
 	if((leftIndex < tokens.size() && tokens.at(leftIndex).empty())
@@ -820,4 +911,62 @@ bool ConditionSet::Expression::SubExpression::AddOperation(vector<int> &data, si
 ConditionSet::Expression::SubExpression::Operation::Operation(const string &op, size_t &a, size_t &b)
 	: fun(Op(op)), a(a), b(b)
 {
+}
+
+
+// Converts the given vector of condition tokens (like "reputation: Republic",
+// "random", or "4") into the integral values they have at runtime.
+vector<int64_t> ConditionSet::Expression::SubExpression::SubstituteValues(const vector<string> &side, const map<string, int64_t> &conditions, const map<string, int64_t> &created) const
+{
+	auto result = vector<int64_t>();
+	std::string temp;
+	auto bracketExpression = bracketExpressions.begin();
+	result.reserve(side.size());
+	for(const string &in_str : side)
+	{
+		int64_t value = 0;
+		const std::string *str = &in_str;
+		// if a bracket expression is involved here, evaluate and apply...
+		if(bracketExpression != bracketExpressions.end()
+				&& bracketExpression->first == result.size()) {
+			ostringstream s;
+			s << in_str << " [" << bracketExpression->second.Evaluate(conditions, created) << "]";
+			temp = s.str();
+			str = &temp;
+			++bracketExpression;
+		}
+		if(*str == "random")
+			value = Random::Int(100);
+		else if(DataNode::IsNumber(*str))
+			value = static_cast<int64_t>(DataNode::Value(*str));
+		else
+		{
+			const auto temp = created.find(*str);
+			const auto perm = conditions.find(*str);
+			if(temp != created.end())
+				value = temp->second;
+			else if(perm != conditions.end())
+				value = perm->second;
+		}
+		result.emplace_back(value);
+	}
+	return result;
+}
+
+std::string ConditionSet::Expression::SubExpression::GetConditionName(const Conditions &conditions, const Conditions &created) const
+{
+	if(tokens.empty())
+		return ""; // should not happen
+	else if(bracketExpressions.empty())
+		return tokens.at(0);
+	else
+	{
+		if(bracketExpressions.size() != 1 || bracketExpressions.front().first != 0) {
+			Files::LogError("Weird, malformed bracket expression in assignment");
+			return "";
+		}
+		ostringstream s;
+		s << tokens.at(0) << " [" << bracketExpressions.front().second.Evaluate(conditions, created) << "]";
+		return s.str();
+	}
 }

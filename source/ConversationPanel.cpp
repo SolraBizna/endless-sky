@@ -323,45 +323,56 @@ void ConversationPanel::Goto(int index, int selectedChoice)
 	// We'll need to reload the choices from whatever new node we arrive at.
 	choices.clear();
 	node = index;
-	// Not every conversation node allows a choice. Move forward through the
-	// nodes until we encounter one that does, or the conversation ends.
-	while(node >= 0 && !conversation.IsChoice(node))
+	while(node >= 0)
 	{
-		int choice = 0;
-		if(conversation.IsBranch(node))
+		// Not every conversation node allows a choice. Move forward through the
+		// nodes until we encounter one that does, or the conversation ends.
+		while(node >= 0 && !conversation.IsChoice(node))
 		{
-			// Branch nodes change the flow of the conversation based on the
-			// player's condition variables rather than player input.
-			choice = !conversation.Conditions(node).Test(player.Conditions());
-		}
-		else if(conversation.IsApply(node))
-		{
-			// Apply nodes alter the player's condition variables but do not
-			// display any conversation text of their own.
-			player.SetReputationConditions();
-			conversation.Conditions(node).Apply(player.Conditions());
-			// Update any altered government reputations.
-			player.CheckReputationConditions();
-		}
-		else
-		{
-			// This is an ordinary conversation node. Perform any necessary text
-			// replacement, then add the text to the display.
-			if(!conversation.ShouldSkipText(player.Conditions(), node))
-		    {
-				string altered = Format::Replace(conversation.Text(node), subs);
-				text.emplace_back(altered, conversation.Scene(node), text.empty());
+			int choice = 0;
+			if(conversation.IsBranch(node))
+			{
+				// Branch nodes change the flow of the conversation based on the
+				// player's condition variables rather than player input.
+				choice = !conversation.Conditions(node).Test(player.Conditions());
 			}
+			else if(conversation.IsApply(node))
+			{
+				// Apply nodes alter the player's condition variables but do not
+				// display any conversation text of their own.
+				player.SetReputationConditions();
+				conversation.Conditions(node).Apply(player.Conditions());
+				// Update any altered government reputations.
+				player.CheckReputationConditions();
+			}
+			else
+			{
+				// This is an ordinary conversation node. Perform any necessary text
+				// replacement, then add the text to the display.
+				if(!conversation.ShouldSkipText(player.Conditions(), node))
+				{
+					string altered = Format::Replace(conversation.Text(node), subs);
+					text.emplace_back(altered, conversation.Scene(node), text.empty());
+				}
+			}
+			node = conversation.NextNode(node, choice);
 		}
-		node = conversation.NextNode(node, choice);
-	}
-	// Display whatever choices are being offered to the player.
-	for(int i = 0; i < conversation.Choices(node); ++i)
-	{
-		if(!conversation.ShouldSkipText(player.Conditions(), node, i))
+		// Display whatever choices are being offered to the player.
+		bool skippedAChoice = false;
+		for(int i = 0; i < conversation.Choices(node); ++i)
 		{
-			string altered = Format::Replace(conversation.Text(node, i), subs);
-			choices.emplace_back(altered, i);
+			if(!conversation.ShouldSkipText(player.Conditions(), node, i))
+			{
+				string altered = Format::Replace(conversation.Text(node, i), subs);
+				choices.emplace_back(altered, i);
+			}
+			else
+				skippedAChoice = true;
+		}
+		if(skippedAChoice && choices.empty()) {
+			// It seems there was a `choice` node, but all of the available
+			// choices failed their conditions. Fall through to the next node.
+			++node;
 		}
 	}
 	this->choice = 0;

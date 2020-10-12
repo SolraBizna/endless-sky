@@ -176,12 +176,14 @@ void ConversationPanel::Draw()
 	{
 		string label = "0:";
 		int index = 0;
-		for(const Paragraph &it : choices)
+		for(const auto &it : choices)
 		{
 			++label[0];
+			
+			const auto& paragraph = it.first;
 		
-			Point center = point + it.Center();
-			Point size(WIDTH, it.Height());
+			Point center = point + paragraph.Center();
+			Point size(WIDTH, paragraph.Height());
 		
 			if(index == choice)
 				FillShader::Fill(center + Point(-5, 0), size + Point(30, 0), selectionColor);
@@ -189,7 +191,7 @@ void ConversationPanel::Draw()
 			++index;
 		
 			font.Draw(label, point + Point(-15, 0), dim);
-			point = it.Draw(point, bright);
+			point = paragraph.Draw(point, bright);
 		}
 	}
 	// Store the total height of the text.
@@ -269,11 +271,11 @@ bool ConversationPanel::KeyDown(SDL_Keycode key, Uint16 mod, const Command &comm
 	else if(key == SDLK_DOWN && choice < conversation.Choices(node) - 1)
 		++choice;
 	else if((key == SDLK_RETURN || key == SDLK_KP_ENTER) && isNewPress && choice < conversation.Choices(node))
-		Goto(conversation.NextNode(node, choice), choice);
+		Goto(conversation.NextNode(node, MapChoice(choice)), MapChoice(choice));
 	else if(key >= '1' && key < static_cast<SDL_Keycode>('1' + choices.size()))
-		Goto(conversation.NextNode(node, key - '1'), key - '1');
+		Goto(conversation.NextNode(node, MapChoice(key - '1')), MapChoice(key - '1'));
 	else if(key >= SDLK_KP_1 && key < static_cast<SDL_Keycode>(SDLK_KP_1 + choices.size()))
-		Goto(conversation.NextNode(node, key - SDLK_KP_1), key - SDLK_KP_1);
+		Goto(conversation.NextNode(node, MapChoice(key - SDLK_KP_1)), MapChoice(key - SDLK_KP_1));
 	else
 		return false;
 	
@@ -307,7 +309,7 @@ void ConversationPanel::Goto(int index, int selectedChoice)
 	{
 		// Add the chosen option to the text.
 		if(selectedChoice >= 0 && selectedChoice < static_cast<int>(choices.size()))
-			text.splice(text.end(), choices, next(choices.begin(), selectedChoice));
+			text.emplace_back(next(choices.begin(), selectedChoice)->first);
 		
 		// Scroll to the start of the new text, unless the conversation ended.
 		if(index >= 0)
@@ -345,16 +347,22 @@ void ConversationPanel::Goto(int index, int selectedChoice)
 		{
 			// This is an ordinary conversation node. Perform any necessary text
 			// replacement, then add the text to the display.
-			string altered = Format::Replace(conversation.Text(node), subs);
-			text.emplace_back(altered, conversation.Scene(node), text.empty());
+			if(!conversation.ShouldSkipText(player.Conditions(), node))
+		    {
+				string altered = Format::Replace(conversation.Text(node), subs);
+				text.emplace_back(altered, conversation.Scene(node), text.empty());
+			}
 		}
 		node = conversation.NextNode(node, choice);
 	}
 	// Display whatever choices are being offered to the player.
 	for(int i = 0; i < conversation.Choices(node); ++i)
 	{
-		string altered = Format::Replace(conversation.Text(node, i), subs);
-		choices.emplace_back(altered);
+		if(!conversation.ShouldSkipText(player.Conditions(), node, i))
+		{
+			string altered = Format::Replace(conversation.Text(node, i), subs);
+			choices.emplace_back(altered, i);
+		}
 	}
 	this->choice = 0;
 }
@@ -402,7 +410,7 @@ void ConversationPanel::ClickName(int side)
 // The player just clicked on a conversation choice.
 void ConversationPanel::ClickChoice(int index)
 {
-	Goto(conversation.NextNode(node, index), index);
+	Goto(conversation.NextNode(node, MapChoice(index)), MapChoice(index));
 }
 
 
@@ -452,4 +460,14 @@ Point ConversationPanel::Paragraph::Draw(Point point, const Color &color) const
 	wrap.Draw(point, color);
 	point.Y() += wrap.Height();
 	return point;
+}
+
+
+
+int ConversationPanel::MapChoice(int n) const
+{
+	if(n < 0 || n >= static_cast<int>(choices.size()))
+		return 0;
+	else
+		return next(choices.cbegin(), n)->second;
 }

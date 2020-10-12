@@ -24,14 +24,20 @@ class DataNode;
 class DataWriter;
 class Sprite;
 
-
-
 // Class representing a conversation, generally occurring when the you are asked to
 // accept or decline a mission. The conversation can take different paths depending
 // on what responses you choose, leading you to accept, decline, or (rarely) to be
 // killed. A conversation can also branch based on various condition flags that
 // are set for the player, and can also modify those flags.
 class Conversation {
+	class Data {
+	public:
+		std::string text; // the text to display
+		int next; // the next node to visit
+		ConditionSet conditions; // conditions for displaying the text
+		explicit Data(std::string text, int next, ConditionSet conditions)
+			: text(text), next(next), conditions(conditions) {}
+	};
 public:
 	// The possible outcomes of a conversation:
 	static const int ACCEPT = -1;
@@ -76,8 +82,8 @@ public:
 	const std::string &Text(int node, int choice = 0) const;
 	const Sprite *Scene(int node) const;
 	int NextNode(int node, int choice = 0) const;
-	
-	
+	bool ShouldSkipText(const std::map<std::string, int64_t> &vars,
+						int node, int choice = 0) const;
 private:
 	// The conversation is a network of "nodes" that you travel between by
 	// making choices (or by automatic branches that depend on the condition
@@ -92,8 +98,9 @@ private:
 		ConditionSet conditions;
 		// The actual conversation text. If this node is not a choice, there
 		// will only be one entry in the vector. Each entry also stores the
-		// number of the node to go to next.
-		std::vector<std::pair<std::string, int>> data;
+		// number of the node to go to next, and the conditions under which to
+		// display the text / offer the choice.
+		std::vector<Data> data;
 		// A "choice" node can have only one option, so rather than checking if
 		// data.size() != 1 we must explicitly store whether this is a choice:
 		bool isChoice;
@@ -106,9 +113,12 @@ private:
 	
 	
 private:
-	// Parse the children of the given node to see if then contain any "gotos."
-	// If so, link them up properly. Return true if gotos were found.
+	// Parse the children of the given node to see if they contain any "gotos"
+	// or "conditions." If so, link them up properly. Return true if gotos or
+	// conditions were found.
 	bool LoadGotos(const DataNode &node);
+	// Parse the children to see if there is a condition.
+	bool HasCondition(const DataNode &node);
 	// Add a label, pointing to whatever node is created next.
 	void AddLabel(const std::string &label, const DataNode &node);
 	// Set up a "goto". Depending on whether the named label has been seen yet

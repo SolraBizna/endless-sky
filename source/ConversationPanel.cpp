@@ -364,7 +364,7 @@ void ConversationPanel::Goto(int index, int selectedChoice)
 			if(!conversation.ShouldSkipText(player.Conditions(), node, i))
 			{
 				string altered = Format::Replace(conversation.Text(node, i), subs);
-				choices.emplace_back(altered, i);
+				choices.emplace_back(Paragraph(altered), i);
 			}
 			else
 				skippedAChoice = true;

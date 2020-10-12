@@ -354,6 +354,12 @@ void ConversationPanel::Goto(int index, int selectedChoice)
 					string altered = Format::Replace(conversation.Text(node), subs);
 					text.emplace_back(altered, conversation.Scene(node), text.empty());
 				}
+				else
+				{
+					// if the text was skipped, don't follow its goto
+					++node;
+					continue;
+				}
 			}
 			node = conversation.NextNode(node, choice);
 		}

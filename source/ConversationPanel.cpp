@@ -375,10 +375,15 @@ void ConversationPanel::Goto(int index, int selectedChoice)
 			else
 				skippedAChoice = true;
 		}
-		if(skippedAChoice && choices.empty()) {
+		if(skippedAChoice && choices.empty())
+		{
 			// It seems there was a `choice` node, but all of the available
 			// choices failed their conditions. Fall through to the next node.
 			++node;
+		}
+		else
+		{
+			break;
 		}
 	}
 	this->choice = 0;
